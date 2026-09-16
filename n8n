@@ -1,0 +1,277 @@
+{
+  "name": "Assistente de investimento_DIO",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "clientes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -592,
+        16
+      ],
+      "id": "852f7ec6-6d82-44cb-affc-3c11a4d9ac92",
+      "name": "Webhook",
+      "webhookId": "304a1ac8-e90b-4fd6-a43e-4b4cc8f72e54"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        752,
+        16
+      ],
+      "id": "01b2b263-198e-434b-a4f6-be3ad30ed464",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "url": "https://digitalinnovationone.github.io/dio-lab-assistente-investimentos-rpa-n8n/data.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -448,
+        16
+      ],
+      "id": "c08dfd55-2da5-46d8-aa25-ba7f239899ae",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -144,
+        -96
+      ],
+      "id": "2b4ab273-fdde-4c5f-968e-0b90a0aa8139",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recupera o texto CSV retornado pelo nó HTTP Request\nconst csvText = $(\"HTTP Request\").first().json.data;\n\n// Divide o texto pelas linhas\nconst lines = csvText.trim().split('\\n');\n\n// Extrai os cabeçalhos da primeira linha\nconst headers = lines[0].split(',').map(h => h.trim());\n\n// Processa cada linha de dados\nconst result = lines.slice(1).map(line => {\n  const values = line.split(',').map(v => v.trim());\n  const row = {};\n\n  headers.forEach((header, index) => {\n    let value = values[index];\n\n    // Converte o valor da coluna 'minimo' para tipo numérico\n    if (header === 'minimo') {\n      value = Number(value);\n    }\n\n    row[header] = value;\n  });\n\n  return { json: row };\n});\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -288,
+        16
+      ],
+      "id": "07d4fb8a-cb92-4352-81d4-e7ba49b304b3",
+      "name": "Lê e trata arquivo CSV"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Obtém os dados que vieram do nó do CSV (Lê e trata arquivo CSV)\n// e os dados dos clientes que vieram do Webhook\nconst produtosCSV = $(\"Lê e trata arquivo CSV\").all().map(item => item.json);\nconst inputWebhook = $input.first().json;\nconst clientes = inputWebhook.body?.clientes || [];\n\n// Função auxiliar para converter valores monetários em string para número\nfunction parseBRL(valor) {\n  if (!valor) return 0;\n  const s = String(valor)\n    .replace(\"R$\", \"\")\n    .replace(/\\./g, \"\")\n    .replace(\",\", \".\")\n    .replace(/[^\\d.]/g, \"\")\n    .trim();\n  const n = Number(s);\n  return Number.isFinite(n) ? n : 0;\n}\n\n// Mapeia cada cliente relacionando com o produto de investimento do seu respectivo perfil\nreturn clientes.map(c => {\n  const saldoNum = parseBRL(c.saldo);\n\n  // Busca o produto correspondente ao perfil do cliente na lista do CSV\n  const recomendacaoPerfil = produtosCSV.find(p => \n    p.perfil?.toLowerCase() === c.perfil?.toLowerCase()\n  ) || {};\n\n  const produtoNome = recomendacaoPerfil.produto || inputWebhook.produto || \"Produto de Investimento\";\n  const minimoVal = recomendacaoPerfil.minimo ?? inputWebhook.minimo ?? 0;\n  const rentabilidadeVal = recomendacaoPerfil.rentabilidade || inputWebhook.rentabilidade || \"N/A\";\n\n  // Verifica se o saldo atende ao valor mínimo\n  const motivoStatus = saldoNum >= minimoVal ? \"saldo_ok\" : \"saldo_insuficiente\";\n\n  return {\n    json: {\n      email_to: c.email,\n      nome: c.nome,\n      perfil: c.perfil,\n      saldo_texto: c.saldo,\n      saldo_num: saldoNum,\n      recomendacao: {\n        perfil: c.perfil,\n        produto: produtoNome,\n        minimo: minimoVal,\n        rentabilidade: rentabilidadeVal\n      },\n      motivo: motivoStatus,\n      mensagem_base: `${c.nome}, indo direto ao ponto: para o perfil ${c.perfil}, **${produtoNome}** (mínimo R$ ${minimoVal}). Você tem ${c.saldo}, então dá pra aplicar. Rentabilidade: ${rentabilidadeVal}.`,\n      copy_rules: {\n        idioma: \"pt-BR\",\n        tom: \"amigável e profissional\",\n        tamanho: \"curto (4-6 linhas)\",\n        evitar: [\n          \"promessas de ganho\",\n          \"garantias\",\n          \"linguagem agressiva\"\n        ]\n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        16
+      ],
+      "id": "756deb4b-819a-4f2f-a895-5dbcbfa30970",
+      "name": "Trata dados para LLM"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4.1-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=Você é um especialista em assessoria de investimentos e comunicação financeira. Sua tarefa é criar uma mensagem personalizada para o cliente com base nas informações do JSON fornecido.\n\nDADOS DO CLIENTE E RECOMENDAÇÃO:\nNome: {{$json.nome}}\nPerfil de Investimento: {{$json.perfil}}\nSaldo Disponível: {{$json.saldo_texto}}\nProduto Sugerido: {{$json.recomendacao.produto}}\nAplicação Mínima: R$ {{$json.recomendacao.minimo}}\nRentabilidade de Referência: {{$json.recomendacao.rentabilidade}}\nMensagem Base: {{$json.mensagem_base}}\n\nDIRETRIZES DE COMUNICAÇÃO:\n1. Tom de Voz: Amigável, acolhedor, profissional e direto ao ponto.\n2. Tamanho: Curto e fluido (entre 3 e 5 parágrafos curtos ou tópicos simples).\n3. Objetivo: Apresentar a opção de investimento adequada ao perfil do cliente como uma oportunidade de análise, mantendo o cliente no controle da decisão.\n\nREGRAS RÍGIDAS DE COMPLIANCE E SEGURANÇA:\n- NUNCA prometa ganhos fixos, lucros certos ou rendimentos garantidos.\n- NUNCA use palavras como \"garantido\", \"sem risco\", \"fique rico\" ou \"lucro certo\".\n- Apresente a rentabilidade informada apenas como um indicador/histórico de referência, e não como uma promessa de rentabilidade futura.\n- Deixe claro de forma sutil que a decisão final de investir é sempre do cliente e alinhada ao seu perfil.\n\nCrie apenas o texto final da mensagem que será enviada diretamente ao cliente (via e-mail ou aplicativo), sem explicações adicionais nem marcações de código."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        144,
+        16
+      ],
+      "id": "7b27ef38-a410-4857-aed6-03970a2e7035",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "cph0Stxx9aG7VnIg",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, index) => {\n  // Pega os dados originais do cliente pelo índice do nó 'Trata dados para LLM'\n  const clienteOriginal = $(\"Trata dados para LLM\").all()[index]?.json || {};\n  \n  // Extrai o texto gerado pela LLM\n  const rawText = item.json.output?.[0]?.content?.[0]?.text || \"\";\n  const textoLimpo = rawText.trim();\n  const textoHTML = textoLimpo.replace(/\\n/g, '<br>');\n\n  return {\n    json: {\n      email_to: clienteOriginal.email_to,\n      nome: clienteOriginal.nome,\n      perfil: clienteOriginal.perfil,\n      assunto_email: `Recomendação de Investimento - Perfil ${clienteOriginal.perfil}`,\n      mensagem_texto: textoLimpo,\n      mensagem_html: `<div style=\"font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #333333;\">${textoHTML}</div>`\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        16
+      ],
+      "id": "4fd2f864-d5f4-4ca0-9aa5-a067d1e5f60b",
+      "name": "Trata output do LLM para email"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_to }}",
+        "subject": "={{ $json.assunto_email }}",
+        "message": "={{ $json.mensagem_html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        592,
+        16
+      ],
+      "id": "a6d9c5f1-02f3-4299-bb99-463d1466709c",
+      "name": "Send a message",
+      "webhookId": "94e114c0-8379-4cd0-85a3-151683d0795b",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "iiyK8yk8Jaj9cCtl",
+          "name": "Gmail account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        []
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Lê e trata arquivo CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Trata dados para LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lê e trata arquivo CSV": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Trata dados para LLM": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Trata output do LLM para email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trata output do LLM para email": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "3fc852b2-d585-433b-822b-1e64be9d76a0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7f10c3bd7c3927315563130f10a7c95b558c18ab56046bdb81c9db764a87b8ec"
+  },
+  "nodeGroups": [],
+  "id": "X5iMfAOiwv20Zyij",
+  "tags": []
+}
